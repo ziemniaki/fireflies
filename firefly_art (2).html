@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fireflies</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+        }
+        
+        body {
+            background: #000;
+            height: 100vh;
+            cursor: none;
+            touch-action: none;
+        }
+        
+        canvas {
+            display: block;
+            background: radial-gradient(circle at center, #001122 0%, #000000 100%);
+        }
+        
+        .start-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.9);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: #ffeb3b;
+            font-family: 'Arial', sans-serif;
+            font-size: 18px;
+            z-index: 100;
+            backdrop-filter: blur(2px);
+            transition: opacity 0.5s ease;
+        }
+        
+        .start-text {
+            text-align: center;
+            opacity: 0.8;
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 0.6; }
+            50% { opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+    <div class="start-overlay" id="startOverlay">
+        <div class="start-text">
+            Touch or click to enter the meadow
+        </div>
+    </div>
+    <canvas id="canvas"></canvas>
+    
+    <script>
+        class Firefly {
+            constructor(x, y, parentFreq) {
+                this.x = x;
+                this.y = y;
+                this.vx = (Math.random() - 0.5) * 0.5;
+                this.vy = (Math.random() - 0.5) * 0.5;
+                this.size = Math.random() * 3 + 1;
+                this.glow = Math.random() * 0.8 + 0.2;
+                this.phase = Math.random() * Math.PI * 2;
+                this.frequency = Math.random() * 0.02 + 0.01;
+                this.color = `hsl(${Math.random() * 30 + 45}, 100%, 70%)`;
+                this.brightness = Math.random() * 0.5 + 0.5;
+                this.glowCycle = Math.random() * Math.PI * 2;
+                
+                // New lifetime properties
+                this.age = 0;
+                this.maxAge = 30000; // 30 seconds in milliseconds
+                this.lastReplicationCheck = 0;
+                this.alpha = 0; // For fade in/out
+                this.fadingIn = true;
+                this.fadingOut = false;
+                
+                // Sound properties
+                const frequencyPool = [261.63, 293.66, 329.63, 349.23, 392.00, 440.00, 493.88, 523.25]; // C4 to C5
+                this.soundFreq = parentFreq || frequencyPool[Math.floor(Math.random() * frequencyPool.length)];
+                this.lastSoundTime = 0;
+            }
+            
+            update(fireflies, lightSources) {
+                this.age += 16; // Approximate frame time
+                
+                // Handle fading
+                if (this.fadingIn) {
+                    this.alpha = Math.min(1, this.alpha + 0.02);
+                    if (this.alpha >= 1) this.fadingIn = false;
+                } else if (this.age > this.maxAge - 2000) { // Start fading out 2 seconds before death
+                    if (!this.fadingOut) this.fadingOut = true;
+                    this.alpha = Math.max(0, this.alpha - 0.01);
+                }
+                
+                // Strong attraction to light sources
+                for (let light of lightSources) {
+                    if (light.intensity > 0.1) {
+                        let dx = light.x - this.x;
+                        let dy = light.y - this.y;
+                        let distance = Math.sqrt(dx * dx + dy * dy);
+                        
+                        if (distance > 0 && distance < 300) {
+                            let force = (light.gravity / (distance * distance)) * 0.4; // Increased force
+                            this.vx += (dx / distance) * force;
+                            this.vy += (dy / distance) * force;
+                            
+                            // Check for close replication
+                            if (distance < 25 && Math.random() < 0.02) { // 1 in 50 chance per frame when close
+                                return this.replicate();
+                            }
+                        }
+                    }
+                }
+                
+                // Flocking behavior (reduced strength to allow light attraction to dominate)
+                let separation = this.separate(fireflies);
+                let alignment = this.align(fireflies);
+                let cohesion = this.cohesion(fireflies);
+                
+                // Apply forces with reduced weights
+                this.vx += separation.x * 0.2 + alignment.x * 0.05 + cohesion.x * 0.05;
+                this.vy += separation.y * 0.2 + alignment.y * 0.05 + cohesion.y * 0.05;
+                
+                // Random replication check every 15 seconds
+                if (Date.now() - this.lastReplicationCheck > 15000) {
+                    this.lastReplicationCheck = Date.now();
+                    if (Math.random() < 0.2) { // 1 in 5 chance
+                        return this.replicate();
+                    }
+                }
+                
+                // Add some randomness
+                this.vx += (Math.random() - 0.5) * 0.02;
+                this.vy += (Math.random() - 0.5) * 0.02;
+                
+                // Gentle drift towards center
+                let centerX = canvas.width / 2;
+                let centerY = canvas.height / 2;
+                let distToCenter = Math.sqrt((this.x - centerX) ** 2 + (this.y - centerY) ** 2);
+                if (distToCenter > Math.min(canvas.width, canvas.height) * 0.4) {
+                    this.vx += (centerX - this.x) * 0.0001;
+                    this.vy += (centerY - this.y) * 0.0001;
+                }
+                
+                // Limit speed
+                let speed = Math.sqrt(this.vx ** 2 + this.vy ** 2);
+                if (speed > 1.5) {
+                    this.vx = (this.vx / speed) * 1.5;
+                    this.vy = (this.vy / speed) * 1.5;
+                }
+                
+                // Update position
+                this.x += this.vx;
+                this.y += this.vy;
+                
+                // Wrap around edges
+                if (this.x < 0) this.x = canvas.width;
+                if (this.x > canvas.width) this.x = 0;
+                if (this.y < 0) this.y = canvas.height;
+                if (this.y > canvas.height) this.y = 0;
+                
+                // Update glow
+                this.glowCycle += this.frequency;
+                this.glow = (Math.sin(this.glowCycle) + 1) * 0.4 + 0.2;
+                
+                // Individual sound
+                if (audioContext && Date.now() - this.lastSoundTime > 3000 + Math.random() * 4000 && this.glow > 0.7) {
+                    this.makeSound();
+                    this.lastSoundTime = Date.now();
+                }
+                
+                return null; // No replication
+            }
+            
+            replicate() {
+                // Create offspring near parent
+                let angle = Math.random() * Math.PI * 2;
+                let distance = 10 + Math.random() * 15;
+                let newX = this.x + Math.cos(angle) * distance;
+                let newY = this.y + Math.sin(angle) * distance;
+                
+                // Keep within bounds
+                newX = Math.max(0, Math.min(canvas.width, newX));
+                newY = Math.max(0, Math.min(canvas.height, newY));
+                
+                return new Firefly(newX, newY, this.soundFreq);
+            }
+            
+            makeSound() {
+                if (!audioContext) return;
+                
+                let oscillator = audioContext.createOscillator();
+                let gainNode = audioContext.createGain();
+                let filter = audioContext.createBiquadFilter();
+                
+                oscillator.type = 'sine';
+                oscillator.frequency.setValueAtTime(this.soundFreq, audioContext.currentTime);
+                
+                // Add slight stochastic variation
+                oscillator.frequency.linearRampToValueAtTime(
+                    this.soundFreq + (Math.random() - 0.5) * 30, 
+                    audioContext.currentTime + 0.3 + Math.random() * 0.3
+                );
+                
+                filter.type = 'lowpass';
+                filter.frequency.setValueAtTime(1200, audioContext.currentTime);
+                
+                gainNode.gain.setValueAtTime(0, audioContext.currentTime);
+                gainNode.gain.linearRampToValueAtTime(0.015 + Math.random() * 0.01, audioContext.currentTime + 0.1);
+                gainNode.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.8);
+                
+                oscillator.connect(filter);
+                filter.connect(gainNode);
+                gainNode.connect(audioContext.destination);
+                
+                oscillator.start();
+                setTimeout(() => {
+                    try { oscillator.stop(); } catch(e) {}
+                }, 1000);
+            }
+            
+            isAlive() {
+                return this.age < this.maxAge;
+            }
+            
+            separate(fireflies) {
+                let desiredSeparation = 30;
+                let steer = {x: 0, y: 0};
+                let count = 0;
+                
+                for (let other of fireflies) {
+                    let distance = Math.sqrt((this.x - other.x) ** 2 + (this.y - other.y) ** 2);
+                    if (distance > 0 && distance < desiredSeparation) {
+                        let diff = {
+                            x: this.x - other.x,
+                            y: this.y - other.y
+                        };
+                        diff.x /= distance;
+                        diff.y /= distance;
+                        steer.x += diff.x;
+                        steer.y += diff.y;
+                        count++;
+                    }
+                }
+                
+                if (count > 0) {
+                    steer.x /= count;
+                    steer.y /= count;
+                }
+                
+                return steer;
+            }
+            
+            align(fireflies) {
+                let neighborDist = 50;
+                let sum = {x: 0, y: 0};
+                let count = 0;
+                
+                for (let other of fireflies) {
+                    let distance = Math.sqrt((this.x - other.x) ** 2 + (this.y - other.y) ** 2);
+                    if (distance > 0 && distance < neighborDist) {
+                        sum.x += other.vx;
+                        sum.y += other.vy;
+                        count++;
+                    }
+                }
+                
+                if (count > 0) {
+                    sum.x /= count;
+                    sum.y /= count;
+                }
+                
+                return sum;
+            }
+            
+            cohesion(fireflies) {
+                let neighborDist = 50;
+                let sum = {x: 0, y: 0};
+                let count = 0;
+                
+                for (let other of fireflies) {
+                    let distance = Math.sqrt((this.x - other.x) ** 2 + (this.y - other.y) ** 2);
+                    if (distance > 0 && distance < neighborDist) {
+                        sum.x += other.x;
+                        sum.y += other.y;
+                        count++;
+                    }
+                }
+                
+                if (count > 0) {
+                    sum.x /= count;
+                    sum.y /= count;
+                    return {
+                        x: (sum.x - this.x) * 0.01,
+                        y: (sum.y - this.y) * 0.01
+                    };
+                }
+                
+                return {x: 0, y: 0};
+            }
+            
+            draw(ctx) {
+                if (this.alpha <= 0) return;
+                
+                let glowIntensity = this.glow * this.brightness * this.alpha;
+                
+                // Outer glow
+                ctx.save();
+                ctx.globalAlpha = glowIntensity * 0.3;
+                ctx.beginPath();
+                let gradient = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, this.size * 8);
+                gradient.addColorStop(0, this.color);
+                gradient.addColorStop(1, 'transparent');
+                ctx.fillStyle = gradient;
+                ctx.arc(this.x, this.y, this.size * 8, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+                
+                // Middle glow
+                ctx.save();
+                ctx.globalAlpha = glowIntensity * 0.6;
+                ctx.beginPath();
+                gradient = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, this.size * 4);
+                gradient.addColorStop(0, this.color);
+                gradient.addColorStop(1, 'transparent');
+                ctx.fillStyle = gradient;
+                ctx.arc(this.x, this.y, this.size * 4, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+                
+                // Core
+                ctx.save();
+                ctx.globalAlpha = glowIntensity;
+                ctx.beginPath();
+                ctx.fillStyle = this.color;
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+        
+        class LightSource {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.size = Math.random() * 30 + 20;
+                this.maxSize = this.size;
+                this.intensity = 1;
+                this.life = 0;
+                this.maxLife = 120 + Math.random() * 60;
+                this.gravity = this.size * 0.8; // Bigger sources have stronger gravity
+                this.color = `hsl(${Math.random() * 60 + 30}, 80%, 85%)`;
+            }
+            
+            update() {
+                this.life++;
+                
+                if (this.life < 10) {
+                    // Rapid flash up
+                    this.intensity = this.life / 10;
+                } else {
+                    // Slow fade
+                    this.intensity = 1 - ((this.life - 10) / (this.maxLife - 10));
+                }
+                
+                this.size = this.maxSize * this.intensity;
+                return this.life < this.maxLife;
+            }
+            
+            draw(ctx) {
+                if (this.intensity <= 0) return;
+                
+                // Large outer glow
+                ctx.save();
+                ctx.globalAlpha = this.intensity * 0.15;
+                let gradient = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, this.size * 4);
+                gradient.addColorStop(0, this.color);
+                gradient.addColorStop(1, 'transparent');
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size * 4, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+                
+                // Medium glow
+                ctx.save();
+                ctx.globalAlpha = this.intensity * 0.4;
+                gradient = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, this.size * 2);
+                gradient.addColorStop(0, this.color);
+                gradient.addColorStop(1, 'transparent');
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size * 2, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+                
+                // Core
+                ctx.save();
+                ctx.globalAlpha = this.intensity;
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size * 0.3, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+        
+        // Audio context for buzzing sounds
+        let audioContext;
+        let oscillators = [];
+        let gainNodes = [];
+        
+        function initAudio() {
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+        }
+        
+        function createLightPadSound(x, y, size) {
+            if (!audioContext) return;
+            
+            // Map position to frequency (300-800Hz range)
+            let baseFreq = 300 + (y / canvas.height) * 500;
+            let volume = Math.min(0.08, size * 0.02);
+            
+            // Create rich pad sound with multiple oscillators
+            for (let i = 0; i < 3; i++) {
+                let oscillator = audioContext.createOscillator();
+                let gainNode = audioContext.createGain();
+                let filter = audioContext.createBiquadFilter();
+                
+                oscillator.type = i === 0 ? 'sine' : 'triangle';
+                let freq = baseFreq * (1 + i * 0.5);
+                oscillator.frequency.setValueAtTime(freq, audioContext.currentTime);
+                
+                filter.type = 'lowpass';
+                filter.frequency.setValueAtTime(1000 + i * 200, audioContext.currentTime);
+                
+                gainNode.gain.setValueAtTime(0, audioContext.currentTime);
+                gainNode.gain.linearRampToValueAtTime(volume / (i + 1), audioContext.currentTime + 0.1);
+                gainNode.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 2 + Math.random());
+                
+                oscillator.connect(filter);
+                filter.connect(gainNode);
+                gainNode.connect(audioContext.destination);
+                
+                oscillator.start();
+                setTimeout(() => {
+                    try { oscillator.stop(); } catch(e) {}
+                }, 3000);
+            }
+        }
+        
+        // Canvas setup
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+        
+        // Fireflies and light sources
+        let fireflies = [];
+        let lightSources = [];
+        let lastSoundTime = 0;
+        let lastLightTime = 0;
+        
+        function initFireflies() {
+            fireflies = [];
+            let count = Math.floor(Math.random() * 10) + 1; // Random 1-10 fireflies
+            
+            for (let i = 0; i < count; i++) {
+                fireflies.push(new Firefly(
+                    Math.random() * canvas.width,
+                    Math.random() * canvas.height
+                ));
+            }
+        }
+        
+        function animate() {
+            // Clear canvas with subtle fade
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.05)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Create new light sources
+            if (Date.now() - lastLightTime > (2000 + Math.random() * 13000)) {
+                let x = Math.random() * canvas.width;
+                let y = Math.random() * canvas.height;
+                let newLight = new LightSource(x, y);
+                lightSources.push(newLight);
+                createLightPadSound(x, y, newLight.maxSize);
+                lastLightTime = Date.now();
+            }
+            
+            // Update and draw light sources
+            lightSources = lightSources.filter(light => {
+                let alive = light.update();
+                if (alive) light.draw(ctx);
+                return alive;
+            });
+            
+            // Update fireflies and handle replication/death
+            let newFireflies = [];
+            fireflies = fireflies.filter(firefly => {
+                let offspring = firefly.update(fireflies, lightSources);
+                if (offspring) {
+                    newFireflies.push(offspring);
+                }
+                
+                if (firefly.isAlive()) {
+                    firefly.draw(ctx);
+                    return true;
+                }
+                return false;
+            });
+            
+            // Add new offspring
+            fireflies = fireflies.concat(newFireflies);
+            
+            // Ensure we don't have too many fireflies (performance)
+            if (fireflies.length > 50) {
+                fireflies = fireflies.slice(0, 50);
+            }
+            
+            requestAnimationFrame(animate);
+        }
+        
+        // Start the experience
+        document.getElementById('startOverlay').addEventListener('click', startExperience);
+        document.getElementById('startOverlay').addEventListener('touchstart', startExperience);
+        
+        function startExperience() {
+            initAudio();
+            initFireflies();
+            
+            document.getElementById('startOverlay').style.opacity = '0';
+            setTimeout(() => {
+                document.getElementById('startOverlay').style.display = 'none';
+            }, 500);
+            
+            animate();
+        }
+        
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            resizeCanvas();
+            if (fireflies.length > 0) {
+                initFireflies();
+            }
+        });
+    </script>
+</body>
+</html>
