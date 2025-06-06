@@ -78,7 +78,7 @@
                 
                 // New lifetime properties
                 this.age = 0;
-                this.maxAge = 30000; // 30 seconds in milliseconds
+                this.maxAge = 60000; // 60 seconds in milliseconds
                 this.lastReplicationCheck = 0;
                 this.alpha = 0; // For fade in/out
                 this.fadingIn = true;
@@ -88,8 +88,11 @@
                 const frequencyPool = [261.63, 293.66, 329.63, 349.23, 392.00, 440.00, 493.88, 523.25]; // C4 to C5
                 this.soundFreq = parentFreq || frequencyPool[Math.floor(Math.random() * frequencyPool.length)];
                 this.lastSoundTime = 0;
-                this.buzzOscillator = null;
+                this.buzzSource = null;
                 this.buzzGain = null;
+                this.buzzFilter = null;
+                this.buzzLFO = null;
+                this.buzzLFOGain = null;
                 this.startBuzz();
             }
             
@@ -118,7 +121,7 @@
                             this.vy += (dy / distance) * force;
                             
                             // Check for close replication
-                            if (distance < 25 && Math.random() < 0.02) { // 1 in 50 chance per frame when close
+                            if (distance < 25 && Math.random() < 0.08) { // increased replication chance when close
                                 return this.replicate();
                             }
                         }
@@ -235,23 +238,60 @@
             startBuzz() {
                 if (!audioContext) return;
 
-                this.buzzOscillator = audioContext.createOscillator();
+                const bufferSize = 2 * audioContext.sampleRate;
+                const noiseBuffer = audioContext.createBuffer(1, bufferSize, audioContext.sampleRate);
+                const output = noiseBuffer.getChannelData(0);
+                for (let i = 0; i < bufferSize; i++) {
+                    output[i] = Math.random() * 2 - 1;
+                }
+
+                this.buzzSource = audioContext.createBufferSource();
+                this.buzzSource.buffer = noiseBuffer;
+                this.buzzSource.loop = true;
+
+                this.buzzFilter = audioContext.createBiquadFilter();
+                this.buzzFilter.type = 'bandpass';
+                this.buzzFilter.frequency.setValueAtTime(100, audioContext.currentTime);
+
                 this.buzzGain = audioContext.createGain();
-                this.buzzOscillator.type = 'sawtooth';
-                this.buzzOscillator.frequency.setValueAtTime(this.soundFreq + (Math.random() - 0.5) * 20,
-                    audioContext.currentTime);
-                this.buzzGain.gain.setValueAtTime(0.03, audioContext.currentTime);
-                this.buzzOscillator.connect(this.buzzGain);
+                this.buzzGain.gain.setValueAtTime(0.0, audioContext.currentTime);
+
+                this.buzzLFO = audioContext.createOscillator();
+                this.buzzLFO.frequency.setValueAtTime(10, audioContext.currentTime);
+                this.buzzLFOGain = audioContext.createGain();
+                this.buzzLFOGain.gain.setValueAtTime(0.02, audioContext.currentTime);
+                this.buzzLFO.connect(this.buzzLFOGain);
+                this.buzzLFOGain.connect(this.buzzGain.gain);
+
+                this.buzzSource.connect(this.buzzFilter);
+                this.buzzFilter.connect(this.buzzGain);
                 this.buzzGain.connect(audioContext.destination);
-                this.buzzOscillator.start();
+
+                this.buzzSource.start();
+                this.buzzLFO.start();
             }
 
             stopBuzz() {
-                if (this.buzzOscillator) {
-                    try { this.buzzOscillator.stop(); } catch(e) {}
-                    this.buzzOscillator.disconnect();
+                if (this.buzzSource) {
+                    try { this.buzzSource.stop(); } catch(e) {}
+                    this.buzzSource.disconnect();
+                    this.buzzSource = null;
+                }
+                if (this.buzzLFO) {
+                    try { this.buzzLFO.stop(); } catch(e) {}
+                    this.buzzLFO.disconnect();
+                    this.buzzLFO = null;
+                }
+                if (this.buzzLFOGain) {
+                    this.buzzLFOGain.disconnect();
+                    this.buzzLFOGain = null;
+                }
+                if (this.buzzFilter) {
+                    this.buzzFilter.disconnect();
+                    this.buzzFilter = null;
+                }
+                if (this.buzzGain) {
                     this.buzzGain.disconnect();
-                    this.buzzOscillator = null;
                     this.buzzGain = null;
                 }
             }
