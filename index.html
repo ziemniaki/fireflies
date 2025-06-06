@@ -78,14 +78,14 @@
                 
                 // New lifetime properties
                 this.age = 0;
-                this.maxAge = 30000; // 30 seconds in milliseconds
+                this.maxAge = 60000; // 30 seconds in milliseconds
                 this.lastReplicationCheck = 0;
                 this.alpha = 0; // For fade in/out
                 this.fadingIn = true;
                 this.fadingOut = false;
                 
                 // Sound properties
-                const frequencyPool = [261.63, 293.66, 329.63, 349.23, 392.00, 440.00, 493.88, 523.25]; // C4 to C5
+                const frequencyPool = [261.63, 293.66, 329.63, 349.23, 392.00, 440.00, 493.88, 523.25, 587.33, 659.25, 698.46, 783.99, 880.00, 987.77, 1046.50, 1174.66, 1318.51, 1396.91, 1567.98, 1760.00, 1975.53, 2093.00]; // C4 to C7
                 this.soundFreq = parentFreq || frequencyPool[Math.floor(Math.random() * frequencyPool.length)];
                 this.lastSoundTime = 0;
                 this.buzzOscillator = null;
@@ -118,7 +118,7 @@
                             this.vy += (dy / distance) * force;
                             
                             // Check for close replication
-                            if (distance < 25 && Math.random() < 0.02) { // 1 in 50 chance per frame when close
+                            if (distance < 45 && Math.random() < 0.2) { // 1 in 50 chance per frame when close
                                 return this.replicate();
                             }
                         }
