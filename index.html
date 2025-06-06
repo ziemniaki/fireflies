@@ -88,6 +88,9 @@
                 const frequencyPool = [261.63, 293.66, 329.63, 349.23, 392.00, 440.00, 493.88, 523.25]; // C4 to C5
                 this.soundFreq = parentFreq || frequencyPool[Math.floor(Math.random() * frequencyPool.length)];
                 this.lastSoundTime = 0;
+                this.buzzOscillator = null;
+                this.buzzGain = null;
+                this.startBuzz();
             }
             
             update(fireflies, lightSources) {
@@ -110,7 +113,7 @@
                         let distance = Math.sqrt(dx * dx + dy * dy);
                         
                         if (distance > 0 && distance < 300) {
-                            let force = (light.gravity / (distance * distance)) * 0.4; // Increased force
+                            let force = (light.gravity / (distance * distance)) * 0.8; // Stronger pull
                             this.vx += (dx / distance) * force;
                             this.vy += (dy / distance) * force;
                             
@@ -227,6 +230,30 @@
                 setTimeout(() => {
                     try { oscillator.stop(); } catch(e) {}
                 }, 1000);
+            }
+
+            startBuzz() {
+                if (!audioContext) return;
+
+                this.buzzOscillator = audioContext.createOscillator();
+                this.buzzGain = audioContext.createGain();
+                this.buzzOscillator.type = 'sawtooth';
+                this.buzzOscillator.frequency.setValueAtTime(this.soundFreq + (Math.random() - 0.5) * 20,
+                    audioContext.currentTime);
+                this.buzzGain.gain.setValueAtTime(0.03, audioContext.currentTime);
+                this.buzzOscillator.connect(this.buzzGain);
+                this.buzzGain.connect(audioContext.destination);
+                this.buzzOscillator.start();
+            }
+
+            stopBuzz() {
+                if (this.buzzOscillator) {
+                    try { this.buzzOscillator.stop(); } catch(e) {}
+                    this.buzzOscillator.disconnect();
+                    this.buzzGain.disconnect();
+                    this.buzzOscillator = null;
+                    this.buzzGain = null;
+                }
             }
             
             isAlive() {
@@ -358,7 +385,7 @@
                 this.intensity = 1;
                 this.life = 0;
                 this.maxLife = 120 + Math.random() * 60;
-                this.gravity = this.size * 0.8; // Bigger sources have stronger gravity
+                this.gravity = this.size * 2; // Bigger sources have much stronger gravity
                 this.color = `hsl(${Math.random() * 60 + 30}, 80%, 85%)`;
             }
             
@@ -478,6 +505,11 @@
         let lightSources = [];
         let lastSoundTime = 0;
         let lastLightTime = 0;
+        let nextLightInterval = 0;
+
+        function setNextLightInterval() {
+            nextLightInterval = 2000 + Math.random() * 13000;
+        }
         
         function initFireflies() {
             fireflies = [];
@@ -496,14 +528,15 @@
             ctx.fillStyle = 'rgba(0, 0, 0, 0.05)';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
             
-            // Create new light sources
-            if (Date.now() - lastLightTime > (2000 + Math.random() * 13000)) {
+            // Create new light sources at random intervals
+            if (Date.now() - lastLightTime > nextLightInterval) {
                 let x = Math.random() * canvas.width;
                 let y = Math.random() * canvas.height;
                 let newLight = new LightSource(x, y);
                 lightSources.push(newLight);
                 createLightPadSound(x, y, newLight.maxSize);
                 lastLightTime = Date.now();
+                setNextLightInterval();
             }
             
             // Update and draw light sources
@@ -520,11 +553,12 @@
                 if (offspring) {
                     newFireflies.push(offspring);
                 }
-                
+
                 if (firefly.isAlive()) {
                     firefly.draw(ctx);
                     return true;
                 }
+                firefly.stopBuzz();
                 return false;
             });
             
@@ -546,6 +580,7 @@
         function startExperience() {
             initAudio();
             initFireflies();
+            setNextLightInterval();
             
             document.getElementById('startOverlay').style.opacity = '0';
             setTimeout(() => {
